@@ -1,0 +1,42 @@
+services:
+
+  backend:
+    build: .
+    expose:
+      - "8000"
+    volumes:
+      - .:/opt/app
+      - static_volume:/opt/app/static/
+      - media_volume:/opt/app/media/
+    depends_on:
+      db:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:latest
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx_configs:/etc/nginx/conf.d:ro
+      - ./data:/data/:ro
+      - static_volume:/opt/app/static/
+      - media_volume:/opt/app/media/
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+  db:
+    image: postgres:13
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    env_file:
+      - postgres.env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --dbname=movies_database --username=app"]
+      interval: 1s
+      timeout: 1s
+
+volumes:
+  postgres_data:
+  static_volume:
+  media_volume:
