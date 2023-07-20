@@ -36,7 +36,20 @@ services:
       interval: 1s
       timeout: 1s
 
+  elasticsearch:
+    image: elasticsearch:8.8.0
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    depends_on:
+      - backend
+
 volumes:
   postgres_data:
   static_volume:
   media_volume:
+  es_data:

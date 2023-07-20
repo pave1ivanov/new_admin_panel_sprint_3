@@ -1,5 +1,5 @@
 import uuid
-from typing import Any
+from typing import Any, List
 from datetime import datetime
 
 from pydantic import BaseModel
@@ -16,16 +16,25 @@ class State:
             state = self.storage.retrieve_state()
         except FileNotFoundError:
             state = dict()
-        state[key] = value
+        state[key] = str(value)
         self.storage.save_state(state)
 
     def get_state(self, key: str) -> Any:
         return self.storage.retrieve_state().get(key)
 
 
-class Movie(BaseModel):
+class Person(BaseModel):
     id: uuid.UUID
+    name: str
+
+class FilmWork(BaseModel):
+    id: uuid.UUID
+    imdb_rating: float
     title: str
+    genres: str
     description: str
-    created_at: datetime
-    updated_at: datetime
+    director: str = ''
+    actors_names: str = ''
+    writers_names: str = ''
+    actors: List[Person] = []
+    writers: List[Person] = []
