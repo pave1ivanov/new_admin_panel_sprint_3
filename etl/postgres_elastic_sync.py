@@ -44,8 +44,7 @@ def extract_changed_from(cursor, next_node: Coroutine) -> Coroutine[tuple[str, s
     """Collect ids of modified rows from a given table"""
     while True:
         table_name, last_modified = (yield)
-        logger.info(f'Looking for changed data for indexing')
-        logger.info(f'Fetching rows from "{table_name}" changed after {last_modified}')
+        logger.info(f'Looking for changed data for indexing in "{table_name}"')
         cursor.execute(SQL.select_modified_ids(table_name), (last_modified,))
         while results := cursor.fetchmany(size=500):
             logger.info(f'Fetching {len(results)} rows from "{table_name}" changed after {last_modified}')
@@ -64,6 +63,7 @@ def extract_film_works_from_changed(cursor, next_node: Coroutine) -> Coroutine[t
 
         if table_name == 'film_work':
             next_node.send((ids, last_modified))
+            state.set_state(table_name, last_modified)
             continue
 
         logger.info(f'Fetching film works related to rows fetched from {table_name}')
@@ -147,7 +147,6 @@ def load_movies(es: Elasticsearch, state: State) -> Coroutine[tuple[list[FilmWor
 
         logger.info(f'Loading to Elasticsearch complete')
         logger.info(f'Updating state: film_work - {last_modified}')
-        state.set_state('film_work', last_modified)
 
 
 if __name__ == '__main__':
