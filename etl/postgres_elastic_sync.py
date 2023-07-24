@@ -6,7 +6,7 @@ from logger import logger
 from typing import Coroutine
 from datetime import datetime
 from dotenv import load_dotenv
-from elasticsearch import Elasticsearch, ConnectionError
+from elasticsearch import Elasticsearch, ConnectionError, helpers
 
 from sql import SQL
 from decorators import coroutine
@@ -35,6 +35,15 @@ def _id_separator(results: list[str, datetime]) -> tuple[list, str]:
     last_modified = max(modified)
     return ids, last_modified
 
+def _actions_generator(film_works: list[FilmWork]):
+    """Yields actions for elasticsearch bulk index helper"""
+    for film_work in film_works:
+        yield {
+            '_index': INDEX,
+            '_id': film_work.id,
+            '_source': film_work.json(),
+        }
+
 
 @backoff.on_exception(backoff.expo,
                       psycopg2.OperationalError,
@@ -47,7 +56,7 @@ def extract_changed_from(cursor, next_node: Coroutine) -> Coroutine[tuple[str, s
         logger.info('Looking for changed data for indexing in %s', table_name)
         cursor.execute(SQL.select_modified_ids(table_name), (last_modified,))
         while results := cursor.fetchmany(size=500):
-            logger.info('Fetching %s rows from %s changed after %s', (len(results), table_name, last_modified))
+            logger.info('Fetching %s rows from %s changed after %s', len(results), table_name, last_modified)
             ids, last_modified = _id_separator(results)
             next_node.send((table_name, last_modified, ids))
 
@@ -73,7 +82,7 @@ def extract_film_works_from_changed(cursor, next_node: Coroutine) -> Coroutine[t
             film_work_ids, last_modified_film_works = _id_separator(results)
             next_node.send((film_work_ids, last_modified_film_works))
 
-        logger.info('Updating state: %s - %s', (table_name, last_modified))
+        logger.info('Updating state: %s - %s', table_name, last_modified)
         state.set_state(table_name, last_modified)
 
 
@@ -138,15 +147,9 @@ def load_movies(es: Elasticsearch, state: State) -> Coroutine[tuple[list[FilmWor
     while True:
         film_works, last_modified = (yield)
         logger.info('Received for loading %s film works', len(film_works))
-        for film_work in film_works:
-            es.index(
-                index=INDEX,
-                id=film_work.id,
-                document=film_work.json(),
-            )
 
+        helpers.bulk(es, _actions_generator(film_works))
         logger.info('Loading to Elasticsearch complete')
-        logger.info('Updating state: film_work - %s', last_modified)
 
 
 if __name__ == '__main__':
