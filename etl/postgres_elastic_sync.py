@@ -17,13 +17,13 @@ from es_index import mapping
 
 dotenv_path = os.path.abspath(os.path.dirname(__file__) + '/../config/.env')
 load_dotenv(dotenv_path)
-INDEX = 'film_work'
 
-TABLE_NAMES = [
+INDEX = 'film_work'
+TABLE_NAMES = (
     'genre',
     'person',
     'film_work'
-]
+)
 
 def _id_separator(results: list[str, datetime]) -> tuple[list, str]:
     """Separate list of ids and max datetime"""
@@ -44,10 +44,10 @@ def extract_changed_from(cursor, next_node: Coroutine) -> Coroutine[tuple[str, s
     """Collect ids of modified rows from a given table"""
     while True:
         table_name, last_modified = (yield)
-        logger.info(f'Looking for changed data for indexing in "{table_name}"')
+        logger.info('Looking for changed data for indexing in %s', table_name)
         cursor.execute(SQL.select_modified_ids(table_name), (last_modified,))
         while results := cursor.fetchmany(size=500):
-            logger.info(f'Fetching {len(results)} rows from "{table_name}" changed after {last_modified}')
+            logger.info('Fetching %s rows from %s changed after %s', (len(results), table_name, last_modified))
             ids, last_modified = _id_separator(results)
             next_node.send((table_name, last_modified, ids))
 
@@ -66,14 +66,14 @@ def extract_film_works_from_changed(cursor, next_node: Coroutine) -> Coroutine[t
             state.set_state(table_name, last_modified)
             continue
 
-        logger.info(f'Fetching film works related to rows fetched from {table_name}')
+        logger.info('Fetching film works related to rows fetched from %s', table_name)
         sql = SQL.select_film_works_from(table_name)
         cursor.execute(sql, (tuple(ids),))
         while results := cursor.fetchmany(size=500):
             film_work_ids, last_modified_film_works = _id_separator(results)
             next_node.send((film_work_ids, last_modified_film_works))
 
-        logger.info(f'Updating state: {table_name} - {last_modified}')
+        logger.info('Updating state: %s - %s', (table_name, last_modified))
         state.set_state(table_name, last_modified)
 
 
@@ -85,7 +85,7 @@ def enrich_film_work(cursor, next_node: Coroutine) -> Coroutine[tuple[list, str]
     """ Enrich given film work ids with all data available """
     while True:
         film_work_ids, last_modified = (yield)
-        logger.info(f'Enriching film works')
+        logger.info('Enriching film works')
         sql = SQL.enrich_film_works()
         cursor.execute(sql, (tuple(film_work_ids),))
         results = cursor.fetchall()
@@ -97,7 +97,7 @@ def transform_movies(next_node: Coroutine) -> Coroutine[tuple[list, str], None, 
     """ Transform film work Postgres entities to the Elasticsearch index format """
     while True:
         sql_results, last_modified = (yield)
-        logger.info(f'Transforming film work data')
+        logger.info('Transforming film work data')
 
         film_works = {}
         for result in sql_results:
@@ -137,7 +137,7 @@ def load_movies(es: Elasticsearch, state: State) -> Coroutine[tuple[list[FilmWor
     """ Load information about changed film works to Elasticsearch """
     while True:
         film_works, last_modified = (yield)
-        logger.info(f'Received for loading {len(film_works)} film works')
+        logger.info('Received for loading %s film works', len(film_works))
         for film_work in film_works:
             es.index(
                 index=INDEX,
@@ -145,8 +145,8 @@ def load_movies(es: Elasticsearch, state: State) -> Coroutine[tuple[list[FilmWor
                 document=film_work.json(),
             )
 
-        logger.info(f'Loading to Elasticsearch complete')
-        logger.info(f'Updating state: film_work - {last_modified}')
+        logger.info('Loading to Elasticsearch complete')
+        logger.info('Updating state: film_work - %s', last_modified)
 
 
 if __name__ == '__main__':
@@ -170,7 +170,7 @@ if __name__ == '__main__':
         body=mapping,
         ignore=400,
     )
-    logger.info(f'Attempted to create Elasticsearch index. Response: {response}')
+    logger.info('Attempted to create Elasticsearch index. Response: %s', response)
 
     with psycopg2.connect(**dsn) as conn, conn.cursor() as cur:
         loader_coro = load_movies(es, state)
