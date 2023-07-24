@@ -1,4 +1,5 @@
 import os
+import json
 import backoff
 import psycopg2
 from time import sleep
@@ -109,44 +110,39 @@ def transform_movies(next_node: Coroutine) -> Coroutine[tuple[list, str], None, 
         sql_results, last_modified = (yield)
         logger.info('Transforming film work data')
 
-        film_works = {}
+        film_works = []
+
         for result in sql_results:
-            role = result[7]
-            person = Person(
-                id=result[8],
-                name=result[9],
-            )
             film_work = FilmWork(
                 id=result[0],
                 title=result[1],
                 description=result[2],
                 imdb_rating=result[3],
-                genres=result[10],
+                genres=' '.join(result[8]),
             )
-            if film_work.id not in film_works:
-                film_works[film_work.id] = film_work
+            for person_dict in result[7]:
+                person = Person(id=person_dict['id'], name=person_dict['name'])
+                if person_dict['role'] == 'director':
+                    film_work.director += person.name + ' '
+                elif person_dict['role'] == 'actor':
+                    film_work.actors_names += person.name + ' '
+                    film_work.actors.append(person)
+                elif person_dict['role'] == 'writer':
+                    film_work.writers_names += person.name + ' '
+                    film_work.writers.append(person)
+            film_works.append(film_work)
 
-            fw = film_works[film_work.id]
-            if role == 'director':
-                fw.director += person.name + ' '
-            elif role == 'actor':
-                fw.actors_names += person.name + ' '
-                fw.actors.append(person)
-            elif role == 'writer':
-                fw.writers_names += person.name + ' '
-                fw.writers.append(person)
-
-        next_node.send((film_works.values(), last_modified))
+        next_node.send(film_works)
 
 
 @backoff.on_exception(backoff.expo,
                       ConnectionError,
                       logger=logger)
 @coroutine
-def load_movies(es: Elasticsearch, state: State) -> Coroutine[tuple[list[FilmWork], str], None, None]:
+def load_movies(es: Elasticsearch) -> Coroutine[tuple[list[FilmWork], str], None, None]:
     """ Load information about changed film works to Elasticsearch """
     while True:
-        film_works, last_modified = (yield)
+        film_works = (yield)
         logger.info('Received for loading %s film works', len(film_works))
 
         helpers.bulk(es, _actions_generator(film_works))
@@ -177,7 +173,7 @@ if __name__ == '__main__':
     logger.info('Attempted to create Elasticsearch index. Response: %s', response)
 
     with closing(psycopg2.connect(**dsn)) as conn, conn.cursor() as cur:
-        loader_coro = load_movies(es, state)
+        loader_coro = load_movies(es)
         transformer_coro = transform_movies(loader_coro)
         enricher_coro = enrich_film_work(cur, transformer_coro)
         film_work_ids_extractor_coro = extract_film_works_from_changed(cur, enricher_coro)

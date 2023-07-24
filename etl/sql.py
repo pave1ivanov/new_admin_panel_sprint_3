@@ -2,23 +2,32 @@ class SQL:
     @staticmethod
     def enrich_film_works():
         return """SELECT
-                      fw.id as fw_id, 
-                      fw.title, 
-                      fw.description, 
-                      fw.rating, 
-                      fw.type, 
-                      fw.created, 
-                      fw.modified, 
-                      pfw.role, 
-                      p.id, 
-                      p.full_name,
-                      g.name
-                  FROM content.film_work fw
-                  LEFT JOIN content.person_film_work pfw ON pfw.film_work_id = fw.id
-                  LEFT JOIN content.person p ON p.id = pfw.person_id
-                  LEFT JOIN content.genre_film_work gfw ON gfw.film_work_id = fw.id
-                  LEFT JOIN content.genre g ON g.id = gfw.genre_id
-                  WHERE fw.id IN %s;"""
+                   fw.id,
+                   fw.title,
+                   fw.description,
+                   fw.rating,
+                   fw.type,
+                   fw.created,
+                   fw.modified,
+                   COALESCE (
+                       json_agg(
+                           DISTINCT jsonb_build_object(
+                               'role', pfw.role,
+                               'id', p.id,
+                               'name', p.full_name
+                           )
+                       ) FILTER (WHERE p.id is not null),
+                       '[]'
+                   ) as persons,
+                   array_agg(DISTINCT g.name) as genres
+                FROM content.film_work fw
+                LEFT JOIN content.person_film_work pfw ON pfw.film_work_id = fw.id
+                LEFT JOIN content.person p ON p.id = pfw.person_id
+                LEFT JOIN content.genre_film_work gfw ON gfw.film_work_id = fw.id
+                LEFT JOIN content.genre g ON g.id = gfw.genre_id
+                WHERE fw.id IN %s
+                GROUP BY fw.id
+                ORDER BY fw.modified;"""
 
     @staticmethod
     def select_modified_ids(table_name, limit=1000):
