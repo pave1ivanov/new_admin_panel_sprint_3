@@ -6,6 +6,7 @@ from logger import logger
 from typing import Coroutine
 from datetime import datetime
 from dotenv import load_dotenv
+from contextlib import closing
 from elasticsearch import Elasticsearch, ConnectionError, helpers
 
 from sql import SQL
@@ -175,7 +176,7 @@ if __name__ == '__main__':
     )
     logger.info('Attempted to create Elasticsearch index. Response: %s', response)
 
-    with psycopg2.connect(**dsn) as conn, conn.cursor() as cur:
+    with closing(psycopg2.connect(**dsn)) as conn, conn.cursor() as cur:
         loader_coro = load_movies(es, state)
         transformer_coro = transform_movies(loader_coro)
         enricher_coro = enrich_film_work(cur, transformer_coro)
@@ -186,4 +187,4 @@ if __name__ == '__main__':
         while True:
             for table_name in TABLE_NAMES:
                 extractor_coro.send((table_name, state.get_state(table_name) or str(datetime.min)))
-            sleep(5)
+            sleep(int(os.environ.get('ETL_ITER_PAUSE_TIME')) or 5)
