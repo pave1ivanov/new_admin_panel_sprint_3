@@ -1,4 +1,4 @@
-import uuid
+from uuid import UUID
 from typing import Any, List
 from datetime import datetime
 
@@ -24,17 +24,19 @@ class State:
 
 
 class Person(BaseModel):
-    id: uuid.UUID
+    uuid: UUID
+    full_name: str
+
+class Genre(BaseModel):
+    uuid: UUID
     name: str
 
 class FilmWork(BaseModel):
-    id: uuid.UUID
+    uuid: UUID
     imdb_rating: float
     title: str
-    genres: str
     description: str
-    director: str = ''
-    actors_names: str = ''
-    writers_names: str = ''
+    genre: List[Genre]
     actors: List[Person] = []
     writers: List[Person] = []
+    directors: List[Person] = []

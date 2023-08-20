@@ -42,14 +42,24 @@ mapping = {
   "mappings": {
     "dynamic": "strict",
     "properties": {
-      "id": {
+      "uuid": {
         "type": "keyword"
       },
       "imdb_rating": {
         "type": "float"
       },
-      "genres": {
-        "type": "keyword"
+      "genre": {
+        "type": "nested",
+        "dynamic": "strict",
+        "properties": {
+          "uuid": {
+            "type": "keyword"
+          },
+          "name": {
+            "type": "text",
+            "analyzer": "ru_en"
+          }
+        }
       },
       "title": {
         "type": "text",
@@ -64,26 +74,14 @@ mapping = {
         "type": "text",
         "analyzer": "ru_en"
       },
-      "director": {
-        "type": "text",
-        "analyzer": "ru_en"
-      },
-      "actors_names": {
-        "type": "text",
-        "analyzer": "ru_en"
-      },
-      "writers_names": {
-        "type": "text",
-        "analyzer": "ru_en"
-      },
       "actors": {
         "type": "nested",
         "dynamic": "strict",
         "properties": {
-          "id": {
+          "uuid": {
             "type": "keyword"
           },
-          "name": {
+          "full_name": {
             "type": "text",
             "analyzer": "ru_en"
           }
@@ -93,10 +91,23 @@ mapping = {
         "type": "nested",
         "dynamic": "strict",
         "properties": {
-          "id": {
+          "uuid": {
             "type": "keyword"
           },
-          "name": {
+          "full_name": {
+            "type": "text",
+            "analyzer": "ru_en"
+          }
+        }
+      },
+      "directors": {
+        "type": "nested",
+        "dynamic": "strict",
+        "properties": {
+          "uuid": {
+            "type": "keyword"
+          },
+          "full_name": {
             "type": "text",
             "analyzer": "ru_en"
           }

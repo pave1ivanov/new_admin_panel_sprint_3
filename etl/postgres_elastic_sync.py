@@ -12,7 +12,7 @@ from elasticsearch import Elasticsearch, ConnectionError, helpers
 
 from sql import SQL
 from decorators import coroutine
-from state.models import State, FilmWork, Person
+from state.models import State, FilmWork, Person, Genre
 from state.json_file_storage import JsonFileStorage
 from es_index import mapping
 
@@ -42,7 +42,7 @@ def _actions_generator(film_works: list[FilmWork]):
     for film_work in film_works:
         yield {
             '_index': INDEX,
-            '_id': film_work.id,
+            '_id': film_work.uuid,
             '_source': film_work.json(),
         }
 
@@ -114,23 +114,22 @@ def transform_movies(next_node: Coroutine) -> Coroutine[tuple[list, str], None, 
 
         for result in sql_results:
             film_work = FilmWork(
-                id=result[0],
+                uuid=result[0],
                 title=result[1],
                 description=result[2],
                 imdb_rating=result[3],
-                genres=' '.join(result[8]),
+                genre=[Genre(uuid=genre['id'], name=genre['name']) for genre in result[8]],
             )
             for person_dict in result[7]:
-                person = Person(id=person_dict['id'], name=person_dict['name'])
+                person = Person(uuid=person_dict['id'], full_name=person_dict['name'])
                 if person_dict['role'] == 'director':
-                    film_work.director += person.name + ' '
+                    film_work.directors.append(person)
                 elif person_dict['role'] == 'actor':
-                    film_work.actors_names += person.name + ' '
                     film_work.actors.append(person)
                 elif person_dict['role'] == 'writer':
-                    film_work.writers_names += person.name + ' '
                     film_work.writers.append(person)
             film_works.append(film_work)
+            print(film_work.json())
 
         next_node.send(film_works)
 
