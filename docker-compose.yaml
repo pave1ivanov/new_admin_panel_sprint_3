@@ -12,6 +12,24 @@ services:
       db:
         condition: service_healthy
 
+  api:
+    build: ./fastapi-solution
+    ports:
+      - 8100:8100
+    expose:
+      - "8100"
+    depends_on:
+      - elasticsearch
+
+  redis:
+      image: redis:latest
+      restart: always
+      ports:
+        - '6379:6379'
+      command: redis-server --save 20 1 --loglevel warning --requirepass eYVX7EwVmmxKPCDmwMtyKVge8oLd2t81
+      volumes:
+        - cache:/data
+
   nginx:
     image: nginx:latest
     volumes:
@@ -53,3 +71,5 @@ volumes:
   static_volume:
   media_volume:
   es_data:
+  cache:
+    driver: local

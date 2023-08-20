@@ -6,4 +6,4 @@ python manage.py collectstatic --no-input
 
 uwsgi --strict --ini uwsgi.ini
 
-#python etl/postgres_elastic_sync.py
+python etl/postgres_elastic_sync.py
