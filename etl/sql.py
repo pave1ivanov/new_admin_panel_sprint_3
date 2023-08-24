@@ -54,3 +54,15 @@ class SQL:
                    WHERE {table_name}_film_work.{table_name}_id IN %s
                    ORDER BY fw.modified
                    LIMIT {limit};"""
+
+    @staticmethod
+    def enrich_genres():
+        return """SELECT
+                  genre.id,
+                  genre.name,
+                  genre.description
+                  FROM content.genre
+                  WHERE genre.id IN %s
+                  ORDER BY genre.modified;"""
+
+

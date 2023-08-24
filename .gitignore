@@ -1,5 +1,7 @@
 # Project-specific
 storage.json
+film_work_state.json
+genre_state.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

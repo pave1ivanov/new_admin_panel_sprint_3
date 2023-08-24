@@ -14,17 +14,26 @@ from sql import SQL
 from decorators import coroutine
 from state.models import State, FilmWork, Person, Genre
 from state.json_file_storage import JsonFileStorage
-from es_index import mapping
+from es_index import get_index
 
 
 dotenv_path = os.path.abspath(os.path.dirname(__file__) + '/../config/.env')
 load_dotenv(dotenv_path)
 
-INDEX = 'film_work'
+INDICES = {
+    Genre.__name__: 'genre',
+    Person.__name__: 'person',
+    FilmWork.__name__: 'film_work'
+}
+
+GENRE_TABLE_NAME = 'genre'
+PERSON_TABLE_NAME = 'person'
+FILM_WORK_TABLE_NAME = 'film_work'
+
 TABLE_NAMES = (
-    'genre',
-    'person',
-    'film_work'
+    GENRE_TABLE_NAME,
+    PERSON_TABLE_NAME,
+    FILM_WORK_TABLE_NAME,
 )
 
 def _id_separator(results: list[str, datetime]) -> tuple[list, str]:
@@ -37,13 +46,14 @@ def _id_separator(results: list[str, datetime]) -> tuple[list, str]:
     last_modified = max(modified)
     return ids, last_modified
 
-def _actions_generator(film_works: list[FilmWork]):
+def _actions_generator(models: list):
     """Yields actions for elasticsearch bulk index helper"""
-    for film_work in film_works:
+    index = INDICES[models[0].__class__.__name__]
+    for model in models:
         yield {
-            '_index': INDEX,
-            '_id': film_work.uuid,
-            '_source': film_work.json(),
+            '_index': index,
+            '_id': model.uuid,
+            '_source': model.json(),
         }
 
 
@@ -92,6 +102,42 @@ def extract_film_works_from_changed(cursor, next_node: Coroutine) -> Coroutine[t
                       psycopg2.OperationalError,
                       logger=logger)
 @coroutine
+def enrich_genres(cursor, next_node: Coroutine) -> Coroutine[tuple[list, str], None, None]:
+    """ Enrich given genres ids with all data available """
+    while True:
+        _, last_modified, genre_ids = (yield)
+        logger.info('Enriching genres')
+        sql = SQL.enrich_genres()
+        cursor.execute(sql, (tuple(genre_ids),))
+        results = cursor.fetchall()
+        next_node.send((results, last_modified))
+
+
+@coroutine
+def transform_genres(next_node: Coroutine) -> Coroutine[tuple[list, str], None, None]:
+    """ Transform genres Postgres entities to the Elasticsearch index format """
+    while True:
+        sql_results, last_modified = (yield)
+        logger.info('Transforming genres data')
+
+        genres = []
+
+        for result in sql_results:
+            genre = Genre(
+                uuid=result[0],
+                name=result[1],
+                description=result[2],
+            )
+            genres.append(genre)
+
+        genre_state.set_state(GENRE_TABLE_NAME, last_modified)
+        next_node.send(genres)
+
+
+@backoff.on_exception(backoff.expo,
+                      psycopg2.OperationalError,
+                      logger=logger)
+@coroutine
 def enrich_film_work(cursor, next_node: Coroutine) -> Coroutine[tuple[list, str], None, None]:
     """ Enrich given film work ids with all data available """
     while True:
@@ -129,7 +175,6 @@ def transform_movies(next_node: Coroutine) -> Coroutine[tuple[list, str], None, 
                 elif person_dict['role'] == 'writer':
                     film_work.writers.append(person)
             film_works.append(film_work)
-            print(film_work.json())
 
         next_node.send(film_works)
 
@@ -138,13 +183,13 @@ def transform_movies(next_node: Coroutine) -> Coroutine[tuple[list, str], None, 
                       ConnectionError,
                       logger=logger)
 @coroutine
-def load_movies(es: Elasticsearch) -> Coroutine[tuple[list[FilmWork], str], None, None]:
-    """ Load information about changed film works to Elasticsearch """
+def load_models(es: Elasticsearch) -> Coroutine[list, None, None]:
+    """ Load information about changed models to Elasticsearch """
     while True:
-        film_works = (yield)
-        logger.info('Received for loading %s film works', len(film_works))
+        models = (yield)
+        logger.info('Received for loading %s items of model %s', len(models), models[0].__class__.__name__)
 
-        helpers.bulk(es, _actions_generator(film_works))
+        helpers.bulk(es, _actions_generator(models))
         logger.info('Loading to Elasticsearch complete')
 
 
@@ -158,28 +203,41 @@ if __name__ == '__main__':
         'options': '-c search_path=content',
     }
     es = Elasticsearch(f"http://{os.environ.get('ELASTIC_HOST')}:{os.environ.get('ELASTIC_PORT')}")
-    state = State(JsonFileStorage(logger=logger))
+    state = State(JsonFileStorage(logger=logger, file_path='film_work_state.json'))
+    genre_state = State(JsonFileStorage(logger=logger, file_path='genre_state.json'))
 
     while not es.ping():
         logger.info('Waiting for Elasticsearch connection...')
         sleep(1)
 
-    response = es.indices.create(
-        index=INDEX,
-        body=mapping,
-        ignore=400,
-    )
-    logger.info('Attempted to create Elasticsearch index. Response: %s', response)
+    for cls, name in INDICES.items():
+        response = es.indices.create(
+            index=name,
+            body=get_index(cls),
+            ignore=400,
+        )
+        logger.info('Attempted to create Elasticsearch index. Response: %s', response)
 
     with closing(psycopg2.connect(**dsn)) as conn, conn.cursor() as cur:
-        loader_coro = load_movies(es)
+        loader_coro = load_models(es)
+
+        # film work etl pipeline
         transformer_coro = transform_movies(loader_coro)
         enricher_coro = enrich_film_work(cur, transformer_coro)
         film_work_ids_extractor_coro = extract_film_works_from_changed(cur, enricher_coro)
         extractor_coro = extract_changed_from(cur, film_work_ids_extractor_coro)
 
+        # genres etl pipeline
+        transform_genres_coro = transform_genres(loader_coro)
+        enrich_genres_coro = enrich_genres(cur, transform_genres_coro)
+        genres_extractor_coro = extract_changed_from(cur, enrich_genres_coro)
+
         logger.info('Starting ETL process for updates ...')
         while True:
+            # starting film work etl
             for table_name in TABLE_NAMES:
                 extractor_coro.send((table_name, state.get_state(table_name) or str(datetime.min)))
+
+            # starting genres etl
+            genres_extractor_coro.send((GENRE_TABLE_NAME, genre_state.get_state(GENRE_TABLE_NAME) or str(datetime.min)))
             sleep(int(os.environ.get('ETL_ITER_PAUSE_TIME')) or 5)
