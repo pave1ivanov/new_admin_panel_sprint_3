@@ -134,6 +134,37 @@ def transform_genres(next_node: Coroutine) -> Coroutine[tuple[list, str], None, 
         next_node.send(genres)
 
 
+@coroutine
+def enrich_persons(cursor, next_node: Coroutine) -> Coroutine[tuple[list, str], None, None]:
+    """ Enrich given persons ids with all data available """
+    while True:
+        _, last_modified, person_ids = (yield)
+        logger.info('Enriching persons')
+        sql = SQL.enrich_persons()
+        cursor.execute(sql, (tuple(person_ids),))
+        results = cursor.fetchall()
+        next_node.send((results, last_modified))
+
+
+@coroutine
+def transform_persons(next_node: Coroutine) -> Coroutine[tuple[list, str], None, None]:
+    """ Transform persons Postgres entities to the Elasticsearch index format """
+    while True:
+        sql_results, last_modified = (yield)
+        logger.info('Transforming persons data')
+
+        persons = []
+
+        for result in sql_results:
+            person = Person(
+                uuid=result[0],
+                full_name=result[1],
+            )
+            persons.append(person)
+
+        person_state.set_state(PERSON_TABLE_NAME, last_modified)
+        next_node.send(persons)
+
 @backoff.on_exception(backoff.expo,
                       psycopg2.OperationalError,
                       logger=logger)
@@ -205,6 +236,7 @@ if __name__ == '__main__':
     es = Elasticsearch(f"http://{os.environ.get('ELASTIC_HOST')}:{os.environ.get('ELASTIC_PORT')}")
     state = State(JsonFileStorage(logger=logger, file_path='film_work_state.json'))
     genre_state = State(JsonFileStorage(logger=logger, file_path='genre_state.json'))
+    person_state = State(JsonFileStorage(logger=logger, file_path='person_state.json'))
 
     while not es.ping():
         logger.info('Waiting for Elasticsearch connection...')
@@ -232,6 +264,11 @@ if __name__ == '__main__':
         enrich_genres_coro = enrich_genres(cur, transform_genres_coro)
         genres_extractor_coro = extract_changed_from(cur, enrich_genres_coro)
 
+        # persons etl pipeline
+        transform_persons_coro = transform_persons(loader_coro)
+        enrich_persons_coro = enrich_persons(cur, transform_persons_coro)
+        persons_extractor_coro = extract_changed_from(cur, enrich_persons_coro)
+
         logger.info('Starting ETL process for updates ...')
         while True:
             # starting film work etl
@@ -240,4 +277,7 @@ if __name__ == '__main__':
 
             # starting genres etl
             genres_extractor_coro.send((GENRE_TABLE_NAME, genre_state.get_state(GENRE_TABLE_NAME) or str(datetime.min)))
+
+            # starting genres etl
+            persons_extractor_coro.send((PERSON_TABLE_NAME, person_state.get_state(PERSON_TABLE_NAME) or str(datetime.min)))
             sleep(int(os.environ.get('ETL_ITER_PAUSE_TIME')) or 5)

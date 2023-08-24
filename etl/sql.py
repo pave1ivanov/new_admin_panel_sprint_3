@@ -65,4 +65,11 @@ class SQL:
                   WHERE genre.id IN %s
                   ORDER BY genre.modified;"""
 
-
+    @staticmethod
+    def enrich_persons():
+        return """SELECT
+                  person.id,
+                  person.full_name
+                  FROM content.person
+                  WHERE person.id IN %s
+                  ORDER BY person.modified;"""
